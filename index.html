@@ -458,7 +458,7 @@
     let hourlyChart = null;
     let dailyChart = null;
 
-    // Open-Meteo with weather_code + precip etc.[web:11]
+    // Open-Meteo with weather_code, is_day, current weather enabled.[web:11]
     async function fetchWeather(lat, lon) {
       const params = new URLSearchParams({
         latitude: lat,
@@ -473,6 +473,7 @@
           'uv_index',
           'precipitation',
           'weather_code',
+          'is_day',
           'wind_speed_10m',
           'wind_direction_10m',
           'wind_gusts_10m'
@@ -489,7 +490,8 @@
           'weather_code'
         ].join(','),
         timezone: 'auto',
-        forecast_days: '10'
+        forecast_days: '10',
+        current_weather: 'true'
       });
 
       const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
@@ -530,7 +532,7 @@
       return 'Clear';
     }
 
-    // Very simple mapping of WMO weather_code to icon type.[web:11][web:50]
+    // Weather code -> day icon; later we wrap with night variant if needed.[web:11][web:50]
     function getIconTypeFromWeatherCode(code) {
       if (code === null || code === undefined) return 'unknown';
       if (code === 0) return 'clear';
@@ -543,8 +545,16 @@
       return 'cloudy';
     }
 
-    // Inline SVG icons (super minimal for demo).[web:49][web:51]
-    function renderWeatherIcon(type) {
+    // Inline SVG icons; "night" wraps clear/partly into a moon style.[web:49][web:51]
+    function renderWeatherIcon(type, isNight) {
+      if (isNight && (type === 'clear' || type === 'partly')) {
+        return `
+          <svg viewBox="0 0 64 64" class="icon-wrapper">
+            <circle cx="26" cy="26" r="15" fill="#0f172a"/>
+            <path d="M40 18a12 12 0 1 1-12 18a12 12 0 0 0 12-18z" fill="#e5e7eb"/>
+          </svg>
+        `;
+      }
       if (type === 'clear') {
         return `
           <svg viewBox="0 0 64 64" class="icon-wrapper">
@@ -630,37 +640,30 @@
       try {
         const data = await fetchWeather(lat, lon);
 
-        // Find index closest to "now" for hourly arrays.[web:11]
-        const now = new Date(data.current_weather_time || data.hourly.time[0]);
-        const hourlyTimes = data.hourly.time.map(t => new Date(t).getTime());
-        const nowMs = now.getTime();
-        let idx = 0;
-        let minDiff = Infinity;
-        for (let i = 0; i < hourlyTimes.length; i++) {
-          const diff = Math.abs(hourlyTimes[i] - nowMs);
-          if (diff < minDiff) {
-            minDiff = diff;
-            idx = i;
-          }
-        }
+        // Use current_weather time & index matching to avoid 00:00 issue.[web:11][web:53]
+        const currentTimeStr = data.current_weather?.time || data.hourly.time[0];
+        const currentTime = new Date(currentTimeStr);
+        const idx = data.hourly.time.findIndex(t => t === currentTimeStr);
+        const idxSafe = idx >= 0 ? idx : 0;
 
-        const temp = data.hourly.temperature_2m[idx];
-        const feels = data.hourly.apparent_temperature[idx];
-        const wind = data.hourly.wind_speed_10m[idx];
-        const windDir = data.hourly.wind_direction_10m[idx];
-        const gusts = data.hourly.wind_gusts_10m[idx] ?? 0;
-        const rainProb = data.hourly.precipitation_probability[idx] ?? 0;
-        const rh = data.hourly.relativehumidity_2m[idx] ?? null;
-        const pressure = data.hourly.surface_pressure[idx] ?? null;
-        const cloud = data.hourly.cloudcover[idx] ?? null;
-        const uv = data.hourly.uv_index ? data.hourly.uv_index[idx] : null;
-        const code = data.hourly.weather_code ? data.hourly.weather_code[idx] : null;
+        const temp = data.current_weather?.temperature ?? data.hourly.temperature_2m[idxSafe];
+        const wind = data.current_weather?.windspeed ?? data.hourly.wind_speed_10m[idxSafe];
+        const windDir = data.current_weather?.winddirection ?? data.hourly.wind_direction_10m[idxSafe];
 
-        const localNow = new Date(data.hourly.time[idx]);
-        const timeLabel = localNow.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const feels = data.hourly.apparent_temperature[idxSafe];
+        const gusts = data.hourly.wind_gusts_10m[idxSafe] ?? 0;
+        const rainProb = data.hourly.precipitation_probability[idxSafe] ?? 0;
+        const rh = data.hourly.relativehumidity_2m[idxSafe] ?? null;
+        const pressure = data.hourly.surface_pressure[idxSafe] ?? null;
+        const cloud = data.hourly.cloudcover[idxSafe] ?? null;
+        const uv = data.hourly.uv_index ? data.hourly.uv_index[idxSafe] : null;
+        const code = data.current_weather?.weathercode ?? (data.hourly.weather_code ? data.hourly.weather_code[idxSafe] : null);
+        const isDay = data.hourly.is_day ? data.hourly.is_day[idxSafe] === 1 : (data.current_weather?.is_day === 1);
+
+        const timeLabel = currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
         const iconType = getIconTypeFromWeatherCode(code);
-        const iconSvg = renderWeatherIcon(iconType);
+        const iconSvg = renderWeatherIcon(iconType, !isDay);
 
         currentEl.innerHTML = `
           <div class="current-main">
@@ -786,7 +789,7 @@
           }
         });
 
-        // DAILY GRID TABLE + DAILY TEMP/RAIN CHART (unchanged structure)
+        // DAILY GRID TABLE + DAILY TEMP/RAIN CHART (same as before)
         let html = '';
         const labelsDaily = [];
         const maxTemps = [];
