@@ -185,16 +185,24 @@
     /* CURRENT WEATHER */
     #current {
       display: grid;
-      grid-template-columns: 1.4fr 1fr;
+      grid-template-columns: 1.5fr 1fr;
       gap: 0.75rem;
       align-items: center;
     }
 
-    .current-main { display: flex; flex-direction: column; gap: 0.15rem; }
+    .current-main { display: flex; flex-direction: column; gap: 0.25rem; }
+
+    .current-top-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
 
     .current-location { font-size: 0.85rem; color: var(--text-muted); }
 
-    .current-temp-row { display: flex; align-items: baseline; gap: 0.5rem; }
+    .current-time { font-size: 0.8rem; color: var(--text-muted); }
+
+    .current-temp-row { display: flex; align-items: baseline; gap: 0.5rem; margin-top: 0.2rem; }
 
     .current-temp {
       font-size: 2.6rem;
@@ -230,6 +238,12 @@
     .meta-value {
       font-size: 0.9rem;
       color: var(--text-main);
+    }
+
+    /* ICON */
+    .icon-wrapper {
+      width: 56px;
+      height: 56px;
     }
 
     /* WIND COMPASS */
@@ -444,6 +458,7 @@
     let hourlyChart = null;
     let dailyChart = null;
 
+    // Open-Meteo with weather_code + precip etc.[web:11]
     async function fetchWeather(lat, lon) {
       const params = new URLSearchParams({
         latitude: lat,
@@ -456,6 +471,8 @@
           'surface_pressure',
           'cloudcover',
           'uv_index',
+          'precipitation',
+          'weather_code',
           'wind_speed_10m',
           'wind_direction_10m',
           'wind_gusts_10m'
@@ -468,7 +485,8 @@
           'wind_speed_10m_max',
           'wind_direction_10m_dominant',
           'uv_index_max',
-          'cloudcover_mean'
+          'cloudcover_mean',
+          'weather_code'
         ].join(','),
         timezone: 'auto',
         forecast_days: '10'
@@ -512,6 +530,94 @@
       return 'Clear';
     }
 
+    // Very simple mapping of WMO weather_code to icon type.[web:11][web:50]
+    function getIconTypeFromWeatherCode(code) {
+      if (code === null || code === undefined) return 'unknown';
+      if (code === 0) return 'clear';
+      if (code === 1 || code === 2) return 'partly';
+      if (code === 3) return 'cloudy';
+      if (code >= 51 && code <= 67) return 'drizzle';
+      if ((code >= 80 && code <= 82) || (code >= 61 && code <= 65)) return 'rain';
+      if (code >= 71 && code <= 77) return 'snow';
+      if (code >= 95) return 'storm';
+      return 'cloudy';
+    }
+
+    // Inline SVG icons (super minimal for demo).[web:49][web:51]
+    function renderWeatherIcon(type) {
+      if (type === 'clear') {
+        return `
+          <svg viewBox="0 0 64 64" class="icon-wrapper">
+            <circle cx="32" cy="32" r="14" fill="#fde68a"/>
+            <g stroke="#fde68a" stroke-width="2">
+              <line x1="32" y1="6" x2="32" y2="0"/>
+              <line x1="32" y1="64" x2="32" y2="58"/>
+              <line x1="6" y1="32" x2="0" y2="32"/>
+              <line x1="64" y1="32" x2="58" y2="32"/>
+              <line x1="12" y1="12" x2="7" y2="7"/>
+              <line x1="52" y1="52" x2="57" y2="57"/>
+              <line x1="12" y1="52" x2="7" y2="57"/>
+              <line x1="52" y1="12" x2="57" y2="7"/>
+            </g>
+          </svg>
+        `;
+      }
+      if (type === 'partly') {
+        return `
+          <svg viewBox="0 0 64 64" class="icon-wrapper">
+            <circle cx="22" cy="22" r="10" fill="#fde68a"/>
+            <path d="M18 40h26a8 8 0 0 0-8-8 10 10 0 0 0-19.5 3" fill="#e5e7eb" stroke="#cbd5f5" stroke-width="2"/>
+          </svg>
+        `;
+      }
+      if (type === 'cloudy') {
+        return `
+          <svg viewBox="0 0 64 64" class="icon-wrapper">
+            <path d="M18 40h24a8 8 0 0 0 0-16 10 10 0 0 0-19.5 3A6 6 0 0 0 18 40z"
+              fill="#e5e7eb" stroke="#cbd5f5" stroke-width="2"/>
+          </svg>
+        `;
+      }
+      if (type === 'rain') {
+        return `
+          <svg viewBox="0 0 64 64" class="icon-wrapper">
+            <path d="M18 32h24a8 8 0 0 0 0-16 10 10 0 0 0-19.5 3A6 6 0 0 0 18 32z"
+              fill="#e5e7eb" stroke="#cbd5f5" stroke-width="2"/>
+            <line x1="22" y1="38" x2="18" y2="48" stroke="#38bdf8" stroke-width="3" stroke-linecap="round"/>
+            <line x1="32" y1="38" x2="28" y2="50" stroke="#38bdf8" stroke-width="3" stroke-linecap="round"/>
+            <line x1="42" y1="38" x2="38" y2="48" stroke="#38bdf8" stroke-width="3" stroke-linecap="round"/>
+          </svg>
+        `;
+      }
+      if (type === 'snow') {
+        return `
+          <svg viewBox="0 0 64 64" class="icon-wrapper">
+            <path d="M18 32h24a8 8 0 0 0 0-16 10 10 0 0 0-19.5 3A6 6 0 0 0 18 32z"
+              fill="#e5e7eb" stroke="#cbd5f5" stroke-width="2"/>
+            <g stroke="#bae6fd" stroke-width="2">
+              <circle cx="22" cy="40" r="2"/>
+              <circle cx="32" cy="46" r="2"/>
+              <circle cx="42" cy="40" r="2"/>
+            </g>
+          </svg>
+        `;
+      }
+      if (type === 'storm') {
+        return `
+          <svg viewBox="0 0 64 64" class="icon-wrapper">
+            <path d="M18 32h24a8 8 0 0 0 0-16 10 10 0 0 0-19.5 3A6 6 0 0 0 18 32z"
+              fill="#e5e7eb" stroke="#cbd5f5" stroke-width="2"/>
+            <polygon points="30,34 24,48 32,46 28,58 40,40 32,42" fill="#facc15"/>
+          </svg>
+        `;
+      }
+      return `
+        <svg viewBox="0 0 64 64" class="icon-wrapper">
+          <circle cx="32" cy="32" r="10" fill="#9ca3af"/>
+        </svg>
+      `;
+    }
+
     async function updateWeather(lat, lon) {
       const loadingEl = document.getElementById('loading');
       const currentEl = document.getElementById('current');
@@ -524,8 +630,20 @@
       try {
         const data = await fetchWeather(lat, lon);
 
-        // CURRENT
-        const idx = 0;
+        // Find index closest to "now" for hourly arrays.[web:11]
+        const now = new Date(data.current_weather_time || data.hourly.time[0]);
+        const hourlyTimes = data.hourly.time.map(t => new Date(t).getTime());
+        const nowMs = now.getTime();
+        let idx = 0;
+        let minDiff = Infinity;
+        for (let i = 0; i < hourlyTimes.length; i++) {
+          const diff = Math.abs(hourlyTimes[i] - nowMs);
+          if (diff < minDiff) {
+            minDiff = diff;
+            idx = i;
+          }
+        }
+
         const temp = data.hourly.temperature_2m[idx];
         const feels = data.hourly.apparent_temperature[idx];
         const wind = data.hourly.wind_speed_10m[idx];
@@ -536,10 +654,20 @@
         const pressure = data.hourly.surface_pressure[idx] ?? null;
         const cloud = data.hourly.cloudcover[idx] ?? null;
         const uv = data.hourly.uv_index ? data.hourly.uv_index[idx] : null;
+        const code = data.hourly.weather_code ? data.hourly.weather_code[idx] : null;
+
+        const localNow = new Date(data.hourly.time[idx]);
+        const timeLabel = localNow.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        const iconType = getIconTypeFromWeatherCode(code);
+        const iconSvg = renderWeatherIcon(iconType);
 
         currentEl.innerHTML = `
           <div class="current-main">
-            <div class="current-location">${formatLatLon(lat, lon)}</div>
+            <div class="current-top-row">
+              <div class="current-location">${formatLatLon(lat, lon)}</div>
+              <div class="current-time">${timeLabel}</div>
+            </div>
             <div class="current-temp-row">
               <div class="current-temp">${Math.round(temp)}°C</div>
               <div class="current-feels">feels like ${Math.round(feels)}°C</div>
@@ -584,6 +712,7 @@
             </div>
           </div>
           <div class="wind-wrapper">
+            <div class="icon-wrapper">${iconSvg}</div>
             <div class="wind-compass">
               <div class="wind-arrow" style="transform: rotate(${windDir}deg);"></div>
             </div>
@@ -591,32 +720,50 @@
           </div>
         `;
 
-        // HOURLY TEMP CHART (24h)
-        const labelsHourly = data.hourly.time.slice(0, 24).map(t =>
+        // HOURLY TEMP + RAIN CHART (today)
+        const todayDateStr = data.daily.time[0];
+        const todayStartIdx = data.hourly.time.findIndex(t => t.startsWith(todayDateStr));
+        const todayEndIdx = todayStartIdx + 24;
+
+        const labelsHourly = data.hourly.time.slice(todayStartIdx, todayEndIdx).map(t =>
           new Date(t).toLocaleTimeString([], { hour: '2-digit' })
         );
-        const tempsHourly = data.hourly.temperature_2m.slice(0, 24);
+        const tempsHourly = data.hourly.temperature_2m.slice(todayStartIdx, todayEndIdx);
+        const rainProbHourly = data.hourly.precipitation_probability.slice(todayStartIdx, todayEndIdx);
+
         const ctxHourly = document.getElementById('temp-chart').getContext('2d');
         if (hourlyChart) hourlyChart.destroy();
         hourlyChart = new Chart(ctxHourly, {
-          type: 'line',
+          type: 'bar',
           data: {
             labels: labelsHourly,
-            datasets: [{
-              label: 'Temperature (°C)',
-              data: tempsHourly,
-              borderColor: '#38bdf8',
-              backgroundColor: 'rgba(56, 189, 248, 0.1)',
-              borderWidth: 2,
-              pointRadius: 0,
-              tension: 0.35
-            }]
+            datasets: [
+              {
+                label: 'Rain (%)',
+                data: rainProbHourly,
+                borderColor: '#38bdf8',
+                backgroundColor: 'rgba(56, 189, 248, 0.35)',
+                borderWidth: 1,
+                yAxisID: 'y1'
+              },
+              {
+                label: 'Temp (°C)',
+                data: tempsHourly,
+                type: 'line',
+                borderColor: '#f97316',
+                backgroundColor: 'rgba(249, 115, 22, 0.2)',
+                borderWidth: 2,
+                pointRadius: 2,
+                tension: 0.35,
+                yAxisID: 'y'
+              }
+            ]
           },
           options: {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
-              legend: { display: false },
+              legend: { labels: { color: '#e5e7eb' } },
               tooltip: { mode: 'index', intersect: false }
             },
             scales: {
@@ -625,20 +772,26 @@
                 ticks: { color: '#9ca3af', maxTicksLimit: 8 }
               },
               y: {
+                position: 'left',
                 grid: { color: 'rgba(15, 23, 42, 0.7)' },
                 ticks: { color: '#9ca3af' }
+              },
+              y1: {
+                position: 'right',
+                grid: { drawOnChartArea: false },
+                ticks: { color: '#9ca3af' },
+                suggestedMax: 100
               }
             }
           }
         });
 
-        // DAILY GRID TABLE + DAILY TEMP CHART
+        // DAILY GRID TABLE + DAILY TEMP/RAIN CHART (unchanged structure)
         let html = '';
         const labelsDaily = [];
         const maxTemps = [];
         const rainSums = [];
 
-        // Build header row
         html += `
           <div class="forecast-grid forecast-header">
             <div>Date</div>
@@ -664,7 +817,6 @@
           const wDirDay = data.daily.wind_direction_10m_dominant[i];
           const uvMax = data.daily.uv_index_max ? data.daily.uv_index_max[i] : null;
           const cloudMean = data.daily.cloudcover_mean ? data.daily.cloudcover_mean[i] : null;
-          const cond = simpleConditionCode(pProb, cloudMean ?? 0);
 
           labelsDaily.push(label);
           maxTemps.push(tMax);
@@ -674,7 +826,7 @@
             <div class="forecast-grid forecast-row">
               <div>
                 <div class="forecast-cell-main">${label}</div>
-                <div class="forecast-cell-sub">${cond}</div>
+                <div class="forecast-cell-sub">${simpleConditionCode(pProb, cloudMean ?? 0)}</div>
               </div>
               <div>
                 <div class="forecast-cell-main">${tMin}° / ${tMax}°</div>
@@ -760,12 +912,14 @@
       }
     }
 
+    // Map click
     map.on('click', e => {
       const { lat, lng } = e.latlng;
       marker.setLatLng([lat, lng]);
       updateWeather(lat, lng);
     });
 
+    // Geolocation button
     document.getElementById('geolocate').addEventListener('click', () => {
       if (!navigator.geolocation) return;
       navigator.geolocation.getCurrentPosition(
@@ -780,6 +934,7 @@
       );
     });
 
+    // Map collapse/expand
     const mapToggle = document.getElementById('map-toggle');
     const mapCard = document.getElementById('map-card');
 
@@ -790,6 +945,7 @@
       setTimeout(() => map.invalidateSize(), 260);
     });
 
+    // Initial load
     updateWeather(INITIAL_LAT, INITIAL_LON);
   </script>
 </body>
