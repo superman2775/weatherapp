@@ -45,7 +45,7 @@
       padding: 1.5rem;
     }
 
-    /* MAP CARD (collapsible) */
+    /* MAP WRAPPER (toggle + card) */
     #map-wrapper {
       display: flex;
       flex-direction: column;
@@ -81,9 +81,7 @@
       transition: transform 0.15s ease;
     }
 
-    #map-toggle.expanded span.chevron {
-      transform: rotate(180deg);
-    }
+    #map-toggle.expanded span.chevron { transform: rotate(180deg); }
 
     #map-card {
       flex: 1;
@@ -95,7 +93,7 @@
       box-shadow: var(--shadow-soft);
       border: 1px solid rgba(148, 163, 184, 0.35);
       transition: height 0.25s ease;
-      height: 220px; /* small by default */
+      height: 220px;
     }
 
     #map-card.collapsed {
@@ -105,10 +103,7 @@
       box-shadow: none;
     }
 
-    #map {
-      width: 100%;
-      height: 100%;
-    }
+    #map { width: 100%; height: 100%; }
 
     .map-overlay {
       position: absolute;
@@ -282,40 +277,53 @@
 
     .wind-label { font-size: 0.75rem; }
 
-    /* CHART */
+    /* CHARTS */
     #chart-container { margin-top: 0.35rem; height: 160px; }
 
-    /* FORECAST LIST */
+    #daily-chart-container {
+      margin-top: 0.6rem;
+      height: 140px;
+    }
+
+    /* FORECAST GRID TABLE */
     #forecast-panel { flex: 1; }
 
     #forecast {
-      margin-top: 0.1rem;
-      max-height: 230px;
+      margin-top: 0.4rem;
+      max-height: 260px;
       overflow-y: auto;
       padding-right: 0.2rem;
     }
 
-    .day {
+    .forecast-grid {
       display: grid;
-      grid-template-columns: 1.4fr 1.6fr 1.4fr;
+      grid-template-columns: 1.5fr 1.5fr 1.3fr 1.2fr 1.1fr;
       gap: 0.35rem;
-      padding: 0.45rem 0.2rem;
-      border-bottom: 1px solid rgba(51, 65, 85, 0.8);
-      font-size: 0.8rem;
+      font-size: 0.78rem;
       align-items: center;
+      padding: 0.25rem 0.2rem;
     }
 
-    .day:last-child { border-bottom: none; }
+    .forecast-header {
+      border-bottom: 1px solid rgba(51, 65, 85, 0.9);
+      color: var(--text-muted);
+      position: sticky;
+      top: 0;
+      background: rgba(15, 23, 42, 0.96);
+      z-index: 2;
+    }
 
-    .day-date { color: var(--text-muted); }
+    .forecast-row {
+      border-bottom: 1px solid rgba(51, 65, 85, 0.7);
+    }
 
-    .day-temp { color: var(--text-main); }
+    .forecast-row:last-child { border-bottom: none; }
+
+    .forecast-cell-main { color: var(--text-main); }
+
+    .forecast-cell-sub { color: var(--text-muted); }
 
     .day-bad { color: var(--danger); }
-
-    .day-wind { text-align: right; color: var(--text-muted); }
-
-    .day-cond { color: var(--text-muted); font-size: 0.75rem; }
 
     /* LOADING / ERROR */
     #loading { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.3rem; }
@@ -330,6 +338,9 @@
       #map-card { height: 220px; }
       #current { grid-template-columns: 1fr; }
       .current-meta-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .forecast-grid {
+        grid-template-columns: 1.7fr 1.4fr 1.2fr 1.2fr 1.1fr;
+      }
     }
 
     @media (max-width: 600px) {
@@ -337,12 +348,16 @@
       .panel { padding: 0.8rem; }
       .current-temp { font-size: 2.2rem; }
       .current-meta-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .forecast-grid {
+        grid-template-columns: 1.6fr 1.4fr 1.1fr 1.1fr 1.0fr;
+        font-size: 0.72rem;
+      }
     }
   </style>
 </head>
 <body>
   <div id="app">
-    <!-- MAP WRAPPER (toggle + card) -->
+    <!-- MAP WRAPPER -->
     <div id="map-wrapper">
       <div id="map-toggle" class="expanded">
         <span>🗺️ Map · click anywhere to get forecast</span>
@@ -393,9 +408,14 @@
         <div class="panel-header">
           <div>
             <div class="title">10‑Day Forecast</div>
-            <div class="subtitle">Temperature • wind • rain • UV/clouds</div>
+            <div class="subtitle">Grid table + daily temperature graph</div>
           </div>
         </div>
+
+        <div id="daily-chart-container">
+          <canvas id="daily-chart"></canvas>
+        </div>
+
         <div id="forecast"></div>
       </div>
     </div>
@@ -405,7 +425,6 @@
     const INITIAL_LAT = 50.85;
     const INITIAL_LON = 4.35;
 
-    // Leaflet + OpenStreetMap
     const map = L.map('map', { zoomControl: true }).setView([INITIAL_LAT, INITIAL_LON], 10);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -422,9 +441,9 @@
       fillOpacity: 0.9
     }).addTo(map);
 
-    let chart = null;
+    let hourlyChart = null;
+    let dailyChart = null;
 
-    // Open-Meteo with extended variables (humidity, pressure, clouds, uv) [web:11][web:34]
     async function fetchWeather(lat, lon) {
       const params = new URLSearchParams({
         latitude: lat,
@@ -505,6 +524,7 @@
       try {
         const data = await fetchWeather(lat, lon);
 
+        // CURRENT
         const idx = 0;
         const temp = data.hourly.temperature_2m[idx];
         const feels = data.hourly.apparent_temperature[idx];
@@ -571,20 +591,20 @@
           </div>
         `;
 
-        // 24h temp chart
-        const labels = data.hourly.time.slice(0, 24).map(t =>
+        // HOURLY TEMP CHART (24h)
+        const labelsHourly = data.hourly.time.slice(0, 24).map(t =>
           new Date(t).toLocaleTimeString([], { hour: '2-digit' })
         );
-        const temps = data.hourly.temperature_2m.slice(0, 24);
-        const ctx = document.getElementById('temp-chart').getContext('2d');
-        if (chart) chart.destroy();
-        chart = new Chart(ctx, {
+        const tempsHourly = data.hourly.temperature_2m.slice(0, 24);
+        const ctxHourly = document.getElementById('temp-chart').getContext('2d');
+        if (hourlyChart) hourlyChart.destroy();
+        hourlyChart = new Chart(ctxHourly, {
           type: 'line',
           data: {
-            labels,
+            labels: labelsHourly,
             datasets: [{
               label: 'Temperature (°C)',
-              data: temps,
+              data: tempsHourly,
               borderColor: '#38bdf8',
               backgroundColor: 'rgba(56, 189, 248, 0.1)',
               borderWidth: 2,
@@ -612,8 +632,23 @@
           }
         });
 
-        // 10-day forecast
+        // DAILY GRID TABLE + DAILY TEMP CHART
         let html = '';
+        const labelsDaily = [];
+        const maxTemps = [];
+        const rainSums = [];
+
+        // Build header row
+        html += `
+          <div class="forecast-grid forecast-header">
+            <div>Date</div>
+            <div>Temp (min/max)</div>
+            <div>Rain</div>
+            <div>Wind</div>
+            <div>UV & Clouds</div>
+          </div>
+        `;
+
         for (let i = 0; i < data.daily.time.length; i++) {
           const date = new Date(data.daily.time[i]);
           const label = date.toLocaleDateString('en', {
@@ -631,24 +666,92 @@
           const cloudMean = data.daily.cloudcover_mean ? data.daily.cloudcover_mean[i] : null;
           const cond = simpleConditionCode(pProb, cloudMean ?? 0);
 
+          labelsDaily.push(label);
+          maxTemps.push(tMax);
+          rainSums.push(pSum);
+
           html += `
-            <div class="day">
+            <div class="forecast-grid forecast-row">
               <div>
-                <div class="day-date">${label}</div>
-                <div class="day-cond">${cond}${uvMax != null ? ` • UV ${uvMax.toFixed(1)}` : ''}</div>
+                <div class="forecast-cell-main">${label}</div>
+                <div class="forecast-cell-sub">${cond}</div>
               </div>
-              <div class="day-temp">
-                <span>${tMin}° / ${tMax}°</span>
-                <span class="${pProb >= 60 ? 'day-bad' : ''}"> • ${pProb}% rain</span>
-                <span> • ${pSum.toFixed(1)} mm</span>
+              <div>
+                <div class="forecast-cell-main">${tMin}° / ${tMax}°</div>
               </div>
-              <div class="day-wind">
-                ${wMax} m/s ${windDirToText(wDirDay)}
+              <div>
+                <div class="forecast-cell-main ${pProb >= 60 ? 'day-bad' : ''}">${pProb}%</div>
+                <div class="forecast-cell-sub">${pSum.toFixed(1)} mm</div>
+              </div>
+              <div>
+                <div class="forecast-cell-main">${wMax} m/s</div>
+                <div class="forecast-cell-sub">${windDirToText(wDirDay)}</div>
+              </div>
+              <div>
+                <div class="forecast-cell-main">${uvMax != null ? uvMax.toFixed(1) : '–'} UV</div>
+                <div class="forecast-cell-sub">${cloudMean != null ? cloudMean + '%' : '– clouds'}</div>
               </div>
             </div>
           `;
         }
         forecastEl.innerHTML = html;
+
+        const ctxDaily = document.getElementById('daily-chart').getContext('2d');
+        if (dailyChart) dailyChart.destroy();
+        dailyChart = new Chart(ctxDaily, {
+          type: 'line',
+          data: {
+            labels: labelsDaily,
+            datasets: [
+              {
+                label: 'Max Temp (°C)',
+                data: maxTemps,
+                borderColor: '#fb923c',
+                backgroundColor: 'rgba(251, 146, 60, 0.15)',
+                borderWidth: 2,
+                pointRadius: 3,
+                tension: 0.3,
+                yAxisID: 'y'
+              },
+              {
+                label: 'Rain (mm)',
+                data: rainSums,
+                borderColor: '#38bdf8',
+                backgroundColor: 'rgba(56, 189, 248, 0.2)',
+                borderWidth: 1,
+                pointRadius: 0,
+                type: 'bar',
+                yAxisID: 'y1'
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                labels: { color: '#e5e7eb', boxWidth: 12 }
+              },
+              tooltip: { mode: 'index', intersect: false }
+            },
+            scales: {
+              x: {
+                grid: { color: 'rgba(15, 23, 42, 0.9)' },
+                ticks: { color: '#9ca3af', maxRotation: 0, minRotation: 0 }
+              },
+              y: {
+                position: 'left',
+                grid: { color: 'rgba(31, 41, 55, 0.8)' },
+                ticks: { color: '#9ca3af' }
+              },
+              y1: {
+                position: 'right',
+                grid: { drawOnChartArea: false },
+                ticks: { color: '#9ca3af' }
+              }
+            }
+          }
+        });
 
       } catch (err) {
         currentEl.innerHTML = `<div class="error">Could not load weather: ${err.message}</div>`;
@@ -657,14 +760,12 @@
       }
     }
 
-    // Map click
     map.on('click', e => {
       const { lat, lng } = e.latlng;
       marker.setLatLng([lat, lng]);
       updateWeather(lat, lng);
     });
 
-    // Geolocation button
     document.getElementById('geolocate').addEventListener('click', () => {
       if (!navigator.geolocation) return;
       navigator.geolocation.getCurrentPosition(
@@ -679,7 +780,6 @@
       );
     });
 
-    // Map collapse/expand
     const mapToggle = document.getElementById('map-toggle');
     const mapCard = document.getElementById('map-card');
 
@@ -687,13 +787,9 @@
       const collapsed = mapCard.classList.toggle('collapsed');
       mapToggle.classList.toggle('expanded', !collapsed);
       mapToggle.querySelector('.chevron').textContent = collapsed ? '▼' : '▲';
-
-      setTimeout(() => {
-        map.invalidateSize();
-      }, 260);
+      setTimeout(() => map.invalidateSize(), 260);
     });
 
-    // Initial load
     updateWeather(INITIAL_LAT, INITIAL_LON);
   </script>
 </body>
